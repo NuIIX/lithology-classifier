@@ -37,8 +37,8 @@ class DataPreprocessor:
         self.upper_quantile = upper_quantile
         self.impute = impute
         self.add_indicators = add_indicators
-        self.global_medians = {}
-        self.clipping_bounds = {}
+        self.global_medians: dict[str, float] = {}
+        self.clipping_bounds: dict[str, tuple[float, float]] = {}
 
     def fit(self, df: pd.DataFrame) -> "DataPreprocessor":
         """
@@ -51,7 +51,8 @@ class DataPreprocessor:
             DataPreprocessor: The fitted instance.
         """
         numeric_cols = [
-            col for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
+            col
+            for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
             if col in df.columns
         ]
 
@@ -61,13 +62,19 @@ class DataPreprocessor:
                 q_low = df[col].quantile(self.lower_quantile)
                 q_high = df[col].quantile(self.upper_quantile)
 
-                phys_low, phys_high = DEFAULT_PHYSICAL_BOUNDS.get(col, (-np.inf, np.inf))
+                phys_low, phys_high = DEFAULT_PHYSICAL_BOUNDS.get(
+                    col, (-np.inf, np.inf)
+                )
                 lower_bound = max(q_low, phys_low) if not np.isnan(q_low) else phys_low
-                upper_bound = min(q_high, phys_high) if not np.isnan(q_high) else phys_high
+                upper_bound = (
+                    min(q_high, phys_high) if not np.isnan(q_high) else phys_high
+                )
 
                 self.clipping_bounds[col] = (lower_bound, upper_bound)
             else:
-                self.clipping_bounds[col] = DEFAULT_PHYSICAL_BOUNDS.get(col, (-np.inf, np.inf))
+                self.clipping_bounds[col] = DEFAULT_PHYSICAL_BOUNDS.get(
+                    col, (-np.inf, np.inf)
+                )
 
         return self
 
@@ -96,7 +103,8 @@ class DataPreprocessor:
         combined = pd.concat(processed_wells, ignore_index=True)
 
         numeric_cols = [
-            col for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
+            col
+            for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
             if col in combined.columns
         ]
 
@@ -155,7 +163,8 @@ class DataPreprocessor:
         original_depths = df_sorted["DEPTH"].values
 
         numeric_cols = [
-            col for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
+            col
+            for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
             if col in df_sorted.columns
         ]
 
@@ -174,7 +183,7 @@ class DataPreprocessor:
                     original_depths[valid_mask],
                     vals[valid_mask],
                     left=np.nan,
-                    right=np.nan
+                    right=np.nan,
                 )
                 new_data[col] = new_vals
             elif valid_mask.sum() == 1:

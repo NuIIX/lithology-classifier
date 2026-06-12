@@ -139,12 +139,17 @@ class DataLoader:
         df_standardized = self._map_columns(df, keep_other=keep_other)
 
         if wells is not None:
-            if "WELL" in df_standardized.columns:
+            if (
+                "WELL" in df_standardized.columns
+                and not df_standardized["WELL"].isna().all()
+            ):
                 df_standardized = df_standardized[
                     df_standardized["WELL"].isin(wells)
                 ].copy()
             else:
-                logger.warning("WELL column not found. Skipping well filtering.")
+                logger.warning(
+                    "WELL column not found or empty. Skipping well filtering."
+                )
 
         return df_standardized
 
@@ -177,7 +182,9 @@ class DataLoader:
         try:
             las = lasio.read(file_path)
         except Exception as e:
-            raise ValueError(f"Failed to parse LAS file {file_path} using lasio: {e}") from e
+            raise ValueError(
+                f"Failed to parse LAS file {file_path} using lasio: {e}"
+            ) from e
 
         well_name = "UNKNOWN"
         if "WELL" in las.well:

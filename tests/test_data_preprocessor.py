@@ -12,7 +12,9 @@ class TestDataPreprocessor(unittest.TestCase):
     """
 
     def setUp(self):
-        self.preprocessor = DataPreprocessor(step=0.2, impute=True, add_indicators=False)
+        self.preprocessor = DataPreprocessor(
+            step=0.2, impute=True, add_indicators=False
+        )
 
     def test_depth_resampling_numeric_and_lithology(self):
         data = {
@@ -92,6 +94,79 @@ class TestDataPreprocessor(unittest.TestCase):
 
         well2_gr = processed[processed["WELL"] == "WELL_2"]["GR"]
         self.assertTrue(well2_gr.isna().all())
+
+    def test_preprocessor_missing_columns(self):
+        """
+        Verify preprocessor raises error when required columns are missing.
+        """
+        df = pd.DataFrame({"GR": [10.0, 20.0]})
+        with self.assertRaises(ValueError):
+            self.preprocessor.transform(df)
+
+    def test_preprocessor_empty_well(self):
+        """
+        Verify preprocessor handles empty well DataFrame correctly.
+        """
+        df = pd.DataFrame(columns=["WELL", "DEPTH", "GR"])
+        processed = self.preprocessor._resample_well(df)
+        self.assertTrue(processed.empty)
+
+    def test_preprocessor_invalid_depth_range(self):
+        """
+        Verify preprocessor handles start_depth > end_depth gracefully.
+        """
+        data = {
+            "WELL": ["WELL_1"] * 2,
+            "DEPTH": [100.01, 100.19],
+            "GR": [10.0, 20.0],
+        }
+        df = pd.DataFrame(data)
+        processed = self.preprocessor.fit_transform(df)
+        self.assertEqual(len(processed), 2)
+
+    def test_preprocessor_single_valid_value(self):
+        """
+        Verify preprocessor handles curve with single valid value correctly.
+        """
+        data = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 101.0, 102.0],
+            "GR": [10.0, np.nan, np.nan],
+        }
+        df = pd.DataFrame(data)
+        self.preprocessor.step = 1.0
+        self.preprocessor.impute = False
+        processed = self.preprocessor.fit_transform(df)
+        np.testing.assert_allclose(processed["GR"].values, [10.0, 10.0, 10.0])
+
+    def test_preprocessor_all_nan_lithology(self):
+        """
+        Verify preprocessor handles curve with all nan lithology correctly.
+        """
+        data = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 101.0, 102.0],
+            "LITHOLOGY": [np.nan, np.nan, np.nan],
+        }
+        df = pd.DataFrame(data)
+        self.preprocessor.step = 1.0
+        processed = self.preprocessor.fit_transform(df)
+        self.assertTrue(processed["LITHOLOGY"].isna().all())
+
+    def test_preprocessor_impute_with_nan_global_median(self):
+        """
+        Verify imputation defaults to 0.0 when global median is NaN.
+        """
+        data = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 101.0, 102.0],
+            "GR": [np.nan, np.nan, np.nan],
+        }
+        df = pd.DataFrame(data)
+        self.preprocessor.step = 1.0
+        self.preprocessor.impute = True
+        processed = self.preprocessor.fit_transform(df)
+        np.testing.assert_allclose(processed["GR"].values, [0.0, 0.0, 0.0])
 
 
 if __name__ == "__main__":
