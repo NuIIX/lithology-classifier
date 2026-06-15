@@ -70,6 +70,18 @@ class DataPreprocessor:
                     min(q_high, phys_high) if not np.isnan(q_high) else phys_high
                 )
 
+                if lower_bound > upper_bound:
+                    logger.warning(
+                        "Inverted clipping bounds for column '%s': lower (%s) > upper (%s). "
+                        "Falling back to physical bounds (%s, %s).",
+                        col,
+                        lower_bound,
+                        upper_bound,
+                        phys_low,
+                        phys_high,
+                    )
+                    lower_bound, upper_bound = phys_low, phys_high
+
                 self.clipping_bounds[col] = (lower_bound, upper_bound)
             else:
                 self.clipping_bounds[col] = DEFAULT_PHYSICAL_BOUNDS.get(
@@ -142,8 +154,23 @@ class DataPreprocessor:
         """
         Resamples a single well's curves onto a uniform depth grid.
         """
+        numeric_cols_standard = [
+            "GR",
+            "RHOB",
+            "NPHI",
+            "DT",
+            "SP",
+            "RDEP",
+            "RMED",
+            "RSHA",
+        ]
+        numeric_cols = [col for col in numeric_cols_standard if col in df.columns]
+
         if df.empty:
-            return df
+            empty_cols = ["WELL", "DEPTH", *numeric_cols]
+            if "LITHOLOGY" in df.columns:
+                empty_cols.append("LITHOLOGY")
+            return pd.DataFrame(columns=empty_cols)
 
         well_name = df["WELL"].iloc[0]
         min_depth = df["DEPTH"].min()
@@ -152,21 +179,19 @@ class DataPreprocessor:
         end_idx = int(np.floor(round(max_depth / self.step, 9)))
 
         if start_idx > end_idx:
-            return df
+            empty_cols = ["WELL", "DEPTH", *numeric_cols]
+            if "LITHOLOGY" in df.columns:
+                empty_cols.append("LITHOLOGY")
+            return pd.DataFrame(columns=empty_cols)
 
         grid = np.round(np.arange(start_idx, end_idx + 1) * self.step, 9)
 
         df_sorted = df.copy()
         df_sorted["DEPTH"] = np.round(df_sorted["DEPTH"].values, 9)
-        df_sorted = df_sorted.drop_duplicates(subset=["DEPTH"]).sort_values("DEPTH")
+        df_sorted = df_sorted.groupby("DEPTH", as_index=False).first()
+        df_sorted = df_sorted.sort_values("DEPTH")
 
         original_depths = df_sorted["DEPTH"].values
-
-        numeric_cols = [
-            col
-            for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
-            if col in df_sorted.columns
-        ]
 
         new_data = {
             "WELL": [well_name] * len(grid),
@@ -175,7 +200,7 @@ class DataPreprocessor:
 
         for col in numeric_cols:
             vals = df_sorted[col].values
-            valid_mask = ~np.isnan(vals)
+            valid_mask = pd.notna(vals)
 
             if valid_mask.sum() > 1:
                 new_vals = np.interp(
@@ -193,12 +218,27 @@ class DataPreprocessor:
 
         if "LITHOLOGY" in df_sorted.columns:
             lith_vals = df_sorted["LITHOLOGY"].values
-            valid_mask = ~np.isnan(lith_vals)
+            valid_mask = pd.notna(lith_vals)
 
             if valid_mask.any():
                 df_lith = df_sorted[["DEPTH", "LITHOLOGY"]].dropna().set_index("DEPTH")
-                df_reindexed = df_lith.reindex(grid, method="nearest")
-                new_data["LITHOLOGY"] = df_reindexed["LITHOLOGY"].values
+                min_lith_depth = df_lith.index.min()
+                max_lith_depth = df_lith.index.max()
+                df_reindexed = df_lith.reindex(
+                    grid, method="nearest", tolerance=self.step * 1.5
+                )
+                lith_values = df_reindexed["LITHOLOGY"].values
+
+                if not (
+                    np.issubdtype(lith_values.dtype, np.floating)
+                    or lith_values.dtype == object
+                ):
+                    lith_values = lith_values.astype(object)
+
+                extrapolation_mask = (grid < min_lith_depth) | (grid > max_lith_depth)
+                lith_values[extrapolation_mask] = np.nan
+
+                new_data["LITHOLOGY"] = lith_values
             else:
                 new_data["LITHOLOGY"] = np.full_like(grid, np.nan)
 

@@ -122,7 +122,7 @@ class TestDataPreprocessor(unittest.TestCase):
         }
         df = pd.DataFrame(data)
         processed = self.preprocessor.fit_transform(df)
-        self.assertEqual(len(processed), 2)
+        self.assertEqual(len(processed), 0)
 
     def test_preprocessor_single_valid_value(self):
         """
@@ -167,6 +167,129 @@ class TestDataPreprocessor(unittest.TestCase):
         self.preprocessor.impute = True
         processed = self.preprocessor.fit_transform(df)
         np.testing.assert_allclose(processed["GR"].values, [0.0, 0.0, 0.0])
+
+    def test_preprocessor_duplicate_depth_aggregation(self):
+        """
+        Verify that duplicate depths are aggregated using first non-NaN value per column.
+        """
+        data = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 100.0, 101.0],
+            "GR": [np.nan, 55.0, 60.0],
+            "RHOB": [2.3, np.nan, 2.4],
+        }
+        df = pd.DataFrame(data)
+        self.preprocessor.step = 1.0
+        self.preprocessor.impute = False
+        self.preprocessor.outlier_method = "physical"
+        processed = self.preprocessor.fit_transform(df)
+
+        self.assertEqual(len(processed), 2)
+        np.testing.assert_allclose(processed["DEPTH"].values, [100.0, 101.0])
+        np.testing.assert_allclose(processed["GR"].values, [55.0, 60.0])
+        np.testing.assert_allclose(processed["RHOB"].values, [2.3, 2.4])
+
+    def test_preprocessor_string_lithology(self):
+        """
+        Verify that preprocessor does not crash on string/object lithologies and processes them.
+        """
+        data = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 103.0, 106.0],
+            "GR": [10.0, 20.0, 30.0],
+            "LITHOLOGY": ["Sandstone", np.nan, "Shale"],
+        }
+        df = pd.DataFrame(data)
+        self.preprocessor.step = 1.0
+        processed = self.preprocessor.fit_transform(df)
+        self.assertEqual(processed["LITHOLOGY"].iloc[0], "Sandstone")
+        self.assertTrue(pd.isna(processed["LITHOLOGY"].iloc[3]))
+        self.assertEqual(processed["LITHOLOGY"].iloc[6], "Shale")
+
+    def test_preprocessor_lithology_tolerance_and_extrapolation(self):
+        """
+        Verify nearest-neighbor reindexing uses tolerance and suppresses extrapolation.
+        """
+        data = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 150.0, 200.0],
+            "LITHOLOGY": [3000.0, np.nan, 4000.0],
+        }
+        df = pd.DataFrame(data)
+        self.preprocessor.step = 10.0
+        processed = self.preprocessor.fit_transform(df)
+
+        self.assertEqual(
+            processed[processed["DEPTH"] == 100.0]["LITHOLOGY"].iloc[0], 3000.0
+        )
+        self.assertEqual(
+            processed[processed["DEPTH"] == 200.0]["LITHOLOGY"].iloc[0], 4000.0
+        )
+        self.assertTrue(
+            pd.isna(processed[processed["DEPTH"] == 150.0]["LITHOLOGY"].iloc[0])
+        )
+        self.assertEqual(
+            processed[processed["DEPTH"] == 110.0]["LITHOLOGY"].iloc[0], 3000.0
+        )
+
+    def test_preprocessor_empty_well_returns_correct_columns(self):
+        """
+        Verify that _resample_well returns an empty DataFrame with the correct schema
+        when df is empty or when start_idx > end_idx.
+        """
+        df_empty = pd.DataFrame(columns=["WELL", "DEPTH", "GR", "LITHOLOGY"])
+        resampled_empty = self.preprocessor._resample_well(df_empty)
+        self.assertTrue(resampled_empty.empty)
+        self.assertEqual(
+            list(resampled_empty.columns), ["WELL", "DEPTH", "GR", "LITHOLOGY"]
+        )
+
+        df_invalid = pd.DataFrame(
+            {
+                "WELL": ["WELL_1"] * 2,
+                "DEPTH": [100.01, 100.19],
+                "GR": [10.0, 20.0],
+                "LITHOLOGY": [3000, 3000],
+            }
+        )
+        self.preprocessor.step = 0.2
+        resampled_invalid = self.preprocessor._resample_well(df_invalid)
+        self.assertTrue(resampled_invalid.empty)
+        self.assertEqual(
+            list(resampled_invalid.columns), ["WELL", "DEPTH", "GR", "LITHOLOGY"]
+        )
+
+    def test_preprocessor_inverted_clipping_bounds_fallback(self):
+        """
+        Verify that if quantile-based clipping bounds are inverted (lower > upper)
+        due to out-of-bounds quantile ranges, the preprocessor falls back to
+        physical bounds to prevent collapsing the entire column.
+        """
+        data_fit = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 101.0, 102.0],
+            "RHOB": [0.45, 0.45, 0.45],
+        }
+        df_fit = pd.DataFrame(data_fit)
+
+        data_trans = {
+            "WELL": ["WELL_1"] * 3,
+            "DEPTH": [100.0, 101.0, 102.0],
+            "RHOB": [0.45, 2.65, 3.8],
+        }
+        df_trans = pd.DataFrame(data_trans)
+
+        self.preprocessor.step = 1.0
+        self.preprocessor.impute = False
+        self.preprocessor.outlier_method = "clip_percentiles"
+
+        self.preprocessor.fit(df_fit)
+
+        self.assertEqual(self.preprocessor.clipping_bounds["RHOB"], (1.0, 3.5))
+
+        processed = self.preprocessor.transform(df_trans)
+
+        np.testing.assert_allclose(processed["RHOB"].values, [1.0, 2.65, 3.5])
 
 
 if __name__ == "__main__":

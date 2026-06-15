@@ -62,16 +62,18 @@ class DataLoader:
             are populated with NaN.
         """
         df_cols_upper = {col.upper(): col for col in df.columns}
-        rename_dict = {}
 
-        for std_name, synonyms in self._standardized_map.items():
-            for synonym in synonyms:
+        has_lithology = False
+        for col in df.columns:
+            if col.upper() == "LITHOLOGY":
+                has_lithology = True
+                break
+        if not has_lithology:
+            lith_synonyms = self._standardized_map.get("LITHOLOGY", [])
+            for synonym in lith_synonyms:
                 if synonym in df_cols_upper:
-                    source_col = df_cols_upper[synonym]
-                    rename_dict[source_col] = std_name
+                    has_lithology = True
                     break
-
-        df_renamed = df.rename(columns=rename_dict)
 
         standard_cols = [
             "WELL",
@@ -85,12 +87,39 @@ class DataLoader:
             "RMED",
             "RSHA",
         ]
-
-        has_lithology = (
-            "LITHOLOGY" in rename_dict.values() or "LITHOLOGY" in df_renamed.columns
-        )
         if has_lithology:
             standard_cols.append("LITHOLOGY")
+
+        rename_dict = {}
+        mapped_sources = set()
+        for std_name in standard_cols:
+            synonyms = self._standardized_map.get(std_name, [std_name])
+            for synonym in synonyms:
+                if synonym in df_cols_upper:
+                    source_col = df_cols_upper[synonym]
+                    rename_dict[source_col] = std_name
+                    mapped_sources.add(source_col)
+                    break
+
+        final_rename = {}
+        used_names = set()
+        for col in df.columns:
+            if col in rename_dict:
+                target_name = rename_dict[col]
+                final_rename[col] = target_name
+                used_names.add(target_name)
+
+        for col in df.columns:
+            if col not in rename_dict:
+                col_upper = col.upper()
+                if col_upper in standard_cols:
+                    new_name = f"{col}_RAW"
+                    while new_name in used_names or new_name in df.columns:
+                        new_name = f"{new_name}_RAW"
+                    final_rename[col] = new_name
+                    used_names.add(new_name)
+
+        df_renamed = df.rename(columns=final_rename)
 
         for col in standard_cols:
             if col not in df_renamed.columns:
@@ -101,12 +130,32 @@ class DataLoader:
 
         return df_renamed
 
+    def _clean_null_values(
+        self, df: pd.DataFrame, target_nulls: list[float]
+    ) -> pd.DataFrame:
+        """
+        Replaces sentinel null values with NaN in a vectorized, high-performance manner.
+        """
+        df = df.copy()
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+
+        for val in target_nulls:
+            df = df.replace(val, np.nan)
+
+            if len(numeric_cols) > 0:
+                is_close = np.abs(df[numeric_cols] - val) <= 1e-4
+                for col in numeric_cols:
+                    df[col] = df[col].mask(is_close[col], np.nan)
+
+        return df
+
     def load_csv(
         self,
         file_path: str,
         sep: str = ";",
         wells: list[str] | None = None,
         keep_other: bool = False,
+        null_values: list[float] | None = None,
     ) -> pd.DataFrame:
         """
         Loads well log data from a CSV file.
@@ -116,6 +165,7 @@ class DataLoader:
             sep (str): Delimiter used in the CSV file. Default is ';'.
             wells (Optional[List[str]]): List of specific well names to filter. If None, all wells are loaded.
             keep_other (bool): Whether to retain non-standard columns in the loaded DataFrame.
+            null_values (Optional[List[float]]): List of additional values to treat as NaN (e.g., -999.25).
 
         Returns:
             pd.DataFrame: A pandas DataFrame containing standardized curve columns.
@@ -137,6 +187,12 @@ class DataLoader:
             raise ValueError(f"CSV file is empty: {file_path}")
 
         df_standardized = self._map_columns(df, keep_other=keep_other)
+
+        target_nulls = [-999.25]
+        if null_values:
+            target_nulls.extend(null_values)
+        target_nulls = list(set(target_nulls))
+        df_standardized = self._clean_null_values(df_standardized, target_nulls)
 
         if wells is not None:
             if (
@@ -203,21 +259,22 @@ class DataLoader:
 
         target_nulls = list(set(target_nulls))
 
-        for val in target_nulls:
-            df = df.replace(val, np.nan)
-            df = df.apply(
-                lambda col, val=val: col.map(
-                    lambda x, val=val: (
-                        np.nan
-                        if isinstance(x, (int, float)) and np.isclose(x, val, atol=1e-4)
-                        else x
-                    )
-                )
-            )
-
-        df["WELL"] = well_name
+        df = self._clean_null_values(df, target_nulls)
 
         df_standardized = self._map_columns(df, keep_other=keep_other)
+
+        if "WELL" in df_standardized.columns:
+            df_standardized["WELL"] = df_standardized["WELL"].apply(
+                lambda x: (
+                    well_name
+                    if (
+                        pd.isna(x)
+                        or str(x).strip() == ""
+                        or str(x).strip().lower() == "nan"
+                    )
+                    else str(x).strip()
+                )
+            )
 
         return df_standardized
 

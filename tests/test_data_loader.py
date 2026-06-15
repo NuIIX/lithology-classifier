@@ -4,6 +4,7 @@ import unittest
 
 import lasio
 import numpy as np
+import pandas as pd
 
 from src.data_loader import DataLoader
 
@@ -249,6 +250,89 @@ class TestDataLoader(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.loader.load_las_directory(temp_dir)
+
+    def test_load_csv_duplicate_columns(self):
+        """
+        Verify that duplicate columns (e.g. LITHOLOGY and FORCE_2020_LITHOFACIES_LITHOLOGY)
+        are handled gracefully without raising duplicate column exceptions or duplicate headers.
+        """
+        data = (
+            "WELL;DEPTH_MD;FORCE_2020_LITHOFACIES_LITHOLOGY;LITHOLOGY;LITHOLOGY_RAW\n"
+            "WELL_A;1000.0;3000;4000;5000\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            f.write(data)
+            temp_csv = f.name
+            self.temp_files.append(temp_csv)
+
+        df = self.loader.load_csv(temp_csv, keep_other=False)
+        self.assertEqual(df["LITHOLOGY"].iloc[0], 3000)
+        self.assertNotIn("LITHOLOGY_RAW", df.columns)
+        self.assertNotIn("LITHOLOGY_RAW_RAW", df.columns)
+
+        df_all = self.loader.load_csv(temp_csv, keep_other=True)
+        self.assertEqual(df_all["LITHOLOGY"].iloc[0], 3000)
+        self.assertEqual(df_all["LITHOLOGY_RAW"].iloc[0], 5000)
+        self.assertEqual(df_all["LITHOLOGY_RAW_RAW"].iloc[0], 4000)
+
+    def test_load_csv_case_insensitive_well(self):
+        """
+        Verify that well or Well columns are mapped to WELL and filtering works.
+        """
+        data = "well;DEPTH_MD;GR\nWELL_A;1000.0;45.2\nWELL_B;2000.0;110.1\n"
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            f.write(data)
+            temp_csv = f.name
+            self.temp_files.append(temp_csv)
+
+        df = self.loader.load_csv(temp_csv, wells=["WELL_B"])
+        self.assertEqual(len(df), 1)
+        self.assertEqual(df["WELL"].iloc[0], "WELL_B")
+
+    def test_load_csv_null_normalization(self):
+        """
+        Verify load_csv normalizes null values like -999.25 and custom values to NaN.
+        """
+        data = "WELL;DEPTH_MD;GR\nWELL_A;1000.0;-999.25\nWELL_A;1001.0;-9999.0\n"
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            f.write(data)
+            temp_csv = f.name
+            self.temp_files.append(temp_csv)
+
+        df = self.loader.load_csv(temp_csv, null_values=[-9999.0])
+        self.assertTrue(np.isnan(df["GR"].iloc[0]))
+        self.assertTrue(np.isnan(df["GR"].iloc[1]))
+
+    def test_null_value_tolerance(self):
+        """
+        Verify that near-match sentinels (e.g. -999.24) are cleaned using absolute tolerance,
+        but relative tolerance is 0 so -999.24 is cleaned while larger deviations are not.
+        """
+        df_test = pd.DataFrame({"GR": [-999.25, -999.25005, -999.24, -999.26]})
+        cleaned = self.loader._clean_null_values(df_test, target_nulls=[-999.25])
+        self.assertTrue(np.isnan(cleaned["GR"].iloc[0]))
+        self.assertTrue(np.isnan(cleaned["GR"].iloc[1]))
+        self.assertFalse(np.isnan(cleaned["GR"].iloc[2]))
+        self.assertFalse(np.isnan(cleaned["GR"].iloc[3]))
+
+    def test_load_las_well_curve_preservation(self):
+        """
+        Verify that if the LAS file has a curve named WELL, it is preserved and not overwritten.
+        """
+        las = lasio.LASFile()
+        las.well["WELL"] = lasio.HeaderItem("WELL", value="TEST_HEADER_WELL")
+
+        las.append_curve("DEPT", [100.0, 101.0], unit="M")
+        las.append_curve("WELL", [111.0, np.nan], unit="")
+
+        with tempfile.NamedTemporaryFile(suffix=".las", delete=False, mode="w") as f:
+            las.write(f)
+            temp_las = f.name
+            self.temp_files.append(temp_las)
+
+        df = self.loader.load_las(temp_las)
+        self.assertEqual(df["WELL"].iloc[0], "111.0")
+        self.assertEqual(df["WELL"].iloc[1], "TEST_HEADER_WELL")
 
 
 if __name__ == "__main__":
