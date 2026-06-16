@@ -16,6 +16,8 @@ dependencies = [
     "xgboost>=2.0.3",
     "catboost>=1.2.5",
     "matplotlib>=3.9.0",
+    "pytest",
+    "pytest-cov",
 ]
 
 [tool.setuptools.packages.find]

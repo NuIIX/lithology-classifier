@@ -434,3 +434,6 @@ data/
 .ruff_cache/
 .coverage
 htmlcov/
+reports/
+*docx
+.ipynb_checkpoints/
