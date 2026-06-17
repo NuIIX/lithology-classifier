@@ -159,7 +159,7 @@ def main():
     train_df, test_df = train_test_split_by_well(raw_df, test_size=0.2, random_state=42)
 
     logger.info("Initializing DataPreprocessor with impute=True...")
-    preprocessor = DataPreprocessor(step=0.1524, impute=True, add_indicators=False)
+    preprocessor = DataPreprocessor(step=0.152, impute=True, add_indicators=False)
 
     logger.info("Fitting DataPreprocessor on Train split...")
     train_df_proc = preprocessor.fit_transform(train_df)

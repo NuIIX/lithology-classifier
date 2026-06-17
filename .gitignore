@@ -428,7 +428,7 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-data/
+/data/
 .venv/
 .mypy_cache/
 .ruff_cache/

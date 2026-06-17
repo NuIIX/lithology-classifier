@@ -24,7 +24,7 @@ class DataPreprocessor:
 
     def __init__(
         self,
-        step: float = 0.1524,
+        step: float = 0.152,
         outlier_method: str = "clip_percentiles",
         lower_quantile: float = 0.001,
         upper_quantile: float = 0.999,
