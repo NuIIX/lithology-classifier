@@ -1,10 +1,13 @@
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from src.data.split import GreedyStratifiedGroupSplit, train_test_split_by_well
+from src.metrics.penalty import ForcePenaltyScorer
 from src.models.baseline_lr import BaselineLogisticRegression
+from src.models.catboost_classifier import LithotypeCatBoostWrapper
 from src.models.random_forest import LithotypeRandomForest
 
 
@@ -254,6 +257,106 @@ class TestValidationAndModels(unittest.TestCase):
         )
         well_1_split = train_df if "WELL_1" in train_df["WELL"].unique() else test_df
         self.assertEqual(len(well_1_split[well_1_split["WELL"] == "WELL_1"]), 15)
+
+    def test_force_penalty_scorer_mock_matrix(self) -> None:
+        """
+        Verify that ForcePenaltyScorer correctly maps lithology codes
+        and computes the average penalty score using a mock matrix.
+        """
+        mock_matrix = np.zeros((12, 12))
+        mock_matrix[0, 11] = 10.0
+
+        scorer = ForcePenaltyScorer(matrix=mock_matrix)
+
+        y_true = np.array([30000, 30000])
+        y_pred = np.array([30000, 93000])
+
+        score = scorer.calculate_penalty_score(y_true, y_pred)
+        self.assertEqual(score, -5.0)
+
+    def test_force_penalty_scorer_empty_input(self) -> None:
+        """
+        Verify that ForcePenaltyScorer returns 0.0 for empty input.
+        """
+        mock_matrix = np.zeros((12, 12))
+        scorer = ForcePenaltyScorer(matrix=mock_matrix)
+        score = scorer.calculate_penalty_score(np.array([]), np.array([]))
+        self.assertEqual(score, 0.0)
+
+    def test_force_penalty_scorer_already_encoded(self) -> None:
+        """
+        Verify that ForcePenaltyScorer correctly computes penalty score
+        when inputs are already encoded as 0..11 indices.
+        """
+        mock_matrix = np.zeros((12, 12))
+        mock_matrix[0, 11] = 10.0
+        scorer = ForcePenaltyScorer(matrix=mock_matrix)
+        y_true = np.array([0, 0])
+        y_pred = np.array([0, 11])
+        score = scorer.calculate_penalty_score(y_true, y_pred)
+        self.assertEqual(score, -5.0)
+
+    def test_force_penalty_scorer_file_load(self) -> None:
+        """
+        Verify that ForcePenaltyScorer can load from a specified path.
+        """
+        import tempfile
+
+        mock_matrix = np.zeros((12, 12))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            matrix_path = Path(tmpdir) / "penalty_matrix.npy"
+            np.save(matrix_path, mock_matrix)
+            scorer = ForcePenaltyScorer(matrix_path=matrix_path)
+            self.assertTrue(np.array_equal(scorer.matrix, mock_matrix))
+
+    def test_lithotype_catboost_wrapper(self) -> None:
+        """
+        Verify that LithotypeCatBoostWrapper fits and predicts successfully.
+        """
+        X = self.df[["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]]
+        from run_experiments import LithoLabelEncoder
+
+        le = LithoLabelEncoder()
+        y = le.fit_transform(self.df["LITHOLOGY"])
+
+        model = LithotypeCatBoostWrapper(iterations=10, depth=4, random_seed=42)
+        model.fit(X, y)
+
+        preds = model.predict(X)
+        self.assertEqual(len(preds), len(X))
+
+        probs = model.predict_proba(X)
+        self.assertEqual(probs.shape, (len(X), len(np.unique(y))))
+
+    def test_lithotype_catboost_wrapper_eval_set(self) -> None:
+        """
+        Verify that LithotypeCatBoostWrapper fits successfully with eval_set.
+        """
+        X = self.df[["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]]
+        from run_experiments import LithoLabelEncoder
+
+        le = LithoLabelEncoder()
+        y = le.fit_transform(self.df["LITHOLOGY"])
+
+        model = LithotypeCatBoostWrapper(iterations=10, depth=4, random_seed=42)
+        model.fit(X, y, eval_set=(X, y))
+
+        preds = model.predict(X)
+        self.assertEqual(len(preds), len(X))
+
+    def test_litho_label_encoder(self) -> None:
+        """
+        Verify that LithoLabelEncoder maps raw lithologies to 0..11 and back.
+        """
+        from run_experiments import LithoLabelEncoder
+
+        le = LithoLabelEncoder()
+        raw_vals = np.array([30000, 65030, 93000])
+        encoded = le.transform(raw_vals)
+        np.testing.assert_array_equal(encoded, np.array([0, 1, 11]))
+
+        decoded = le.inverse_transform(encoded)
+        np.testing.assert_array_equal(decoded, raw_vals)
 
 
 if __name__ == "__main__":
