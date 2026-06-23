@@ -427,3 +427,10 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+data/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
