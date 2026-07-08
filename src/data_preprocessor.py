@@ -24,7 +24,7 @@ class DataPreprocessor:
 
     def __init__(
         self,
-        step: float = 0.152,
+        step: float = 0.1524,
         outlier_method: str = "clip_percentiles",
         lower_quantile: float = 0.001,
         upper_quantile: float = 0.999,
@@ -110,9 +110,27 @@ class DataPreprocessor:
         for well in wells:
             well_df = df[df["WELL"] == well].copy()
             well_df = self._resample_well(well_df)
-            processed_wells.append(well_df)
+            if not well_df.empty:
+                processed_wells.append(well_df)
+
+        if not processed_wells:
+            numeric_cols = [
+                col
+                for col in ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
+                if col in df.columns
+            ]
+            empty_cols = ["WELL", "DEPTH"]
+            for col in numeric_cols:
+                if col not in empty_cols:
+                    empty_cols.append(col)
+            if "LITHOLOGY" in df.columns and "LITHOLOGY" not in empty_cols:
+                empty_cols.append("LITHOLOGY")
+            return pd.DataFrame(columns=empty_cols)
 
         combined = pd.concat(processed_wells, ignore_index=True)
+
+        if combined.empty:
+            return combined
 
         numeric_cols = [
             col

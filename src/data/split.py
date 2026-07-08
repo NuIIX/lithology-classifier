@@ -15,6 +15,10 @@ class GreedyStratifiedGroupSplit:
     """
 
     def __init__(self, test_size: float = 0.2, random_state: int = 42):
+        if not (0.0 < test_size < 1.0):
+            raise ValueError(
+                f"test_size must be strictly between 0 and 1, got {test_size}"
+            )
         self.test_size = test_size
         self.train_size = 1.0 - test_size
         self.random_state = random_state
@@ -51,7 +55,14 @@ class GreedyStratifiedGroupSplit:
         global_counts = group_class_counts.sum(axis=0)
         sorted_classes = global_counts.sort_values().index.tolist()
 
-        groups = df[groups_col].dropna().unique().tolist()
+        groups = group_class_counts.index.tolist()
+
+        if len(groups) < 2:
+            raise ValueError(
+                f"Stratification requires at least 2 distinct groups, but found {len(groups)}."
+            )
+
+        all_input_groups = df[groups_col].dropna().unique().tolist()
 
         train_groups: list[str] = []
         test_groups: list[str] = []
@@ -85,21 +96,22 @@ class GreedyStratifiedGroupSplit:
 
                 for c_name in global_counts.index:
                     t_val = global_counts[c_name]
+                    eps = 1e-9
 
                     diff_tr_train = (
                         cand_train_counts[c_name] - self.train_size * t_val
-                    ) / t_val
+                    ) / (t_val + eps)
                     diff_ts_train = (
                         class_test_counts[c_name] - self.test_size * t_val
-                    ) / t_val
+                    ) / (t_val + eps)
                     loss_train += diff_tr_train**2 + diff_ts_train**2
 
                     diff_tr_test = (
                         class_train_counts[c_name] - self.train_size * t_val
-                    ) / t_val
+                    ) / (t_val + eps)
                     diff_ts_test = (
                         cand_test_counts[c_name] - self.test_size * t_val
-                    ) / t_val
+                    ) / (t_val + eps)
                     loss_test += diff_tr_test**2 + diff_ts_test**2
 
                 n_tr_train = len(train_groups) + 1
@@ -127,7 +139,7 @@ class GreedyStratifiedGroupSplit:
                     class_test_counts += g_counts
                     assigned_groups.add(g)
 
-        remaining_groups = [g for g in groups if g not in assigned_groups]
+        remaining_groups = [g for g in all_input_groups if g not in assigned_groups]
         if remaining_groups:
             rng = np.random.default_rng(self.random_state)
             rng.shuffle(remaining_groups)
@@ -139,6 +151,70 @@ class GreedyStratifiedGroupSplit:
                     train_groups.append(g)
                 else:
                     test_groups.append(g)
+
+        # Enforce non-empty splits of labeled groups if one of them is empty
+        train_labeled = [g for g in train_groups if g in group_class_counts.index]
+        test_labeled = [g for g in test_groups if g in group_class_counts.index]
+        if not train_labeled or not test_labeled:
+
+            def compute_split_loss(tr_list: list[str], ts_list: list[str]) -> float:
+                tr_labeled = [g for g in tr_list if g in group_class_counts.index]
+                ts_labeled = [g for g in ts_list if g in group_class_counts.index]
+                tr_c = (
+                    group_class_counts.loc[tr_labeled].sum(axis=0)
+                    if tr_labeled
+                    else pd.Series(0.0, index=global_counts.index)
+                )
+                ts_c = (
+                    group_class_counts.loc[ts_labeled].sum(axis=0)
+                    if ts_labeled
+                    else pd.Series(0.0, index=global_counts.index)
+                )
+                loss = 0.0
+                eps = 1e-9
+                for c_name in global_counts.index:
+                    t_val = global_counts[c_name]
+                    diff_tr = (tr_c.get(c_name, 0.0) - self.train_size * t_val) / (
+                        t_val + eps
+                    )
+                    diff_ts = (ts_c.get(c_name, 0.0) - self.test_size * t_val) / (
+                        t_val + eps
+                    )
+                    loss += diff_tr**2 + diff_ts**2
+                n_tr = len(tr_labeled)
+                n_ts = len(ts_labeled)
+                n_tot = len(groups)
+                well_loss = ((n_tr - self.train_size * n_tot) / n_tot) ** 2 + (
+                    (n_ts - self.test_size * n_tot) / n_tot
+                ) ** 2
+                return loss + 0.1 * well_loss
+
+            if not train_labeled:
+                best_g = None
+                best_loss = float("inf")
+                for g in test_labeled:
+                    cand_tr = [*train_groups, g]
+                    cand_ts = [x for x in test_groups if x != g]
+                    loss = compute_split_loss(cand_tr, cand_ts)
+                    if loss < best_loss:
+                        best_loss = loss
+                        best_g = g
+                if best_g is not None:
+                    train_groups.append(best_g)
+                    test_groups.remove(best_g)
+            else:
+                best_g = None
+                best_loss = float("inf")
+                for g in train_labeled:
+                    cand_tr = [x for x in train_groups if x != g]
+                    cand_ts = [*test_groups, g]
+                    loss = compute_split_loss(cand_tr, cand_ts)
+                    if loss < best_loss:
+                        best_loss = loss
+                        best_g = g
+                if best_g is not None:
+                    test_groups.append(best_g)
+                    train_groups.remove(best_g)
 
         return train_groups, test_groups
 

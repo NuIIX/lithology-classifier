@@ -437,3 +437,6 @@ htmlcov/
 reports/
 *docx
 .ipynb_checkpoints/
+
+lithology-presentation/
+catboost_info/

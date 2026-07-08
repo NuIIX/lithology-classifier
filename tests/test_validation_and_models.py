@@ -14,7 +14,7 @@ class TestValidationAndModels(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-
+        rng = np.random.default_rng(42)
         self.dummy_data = {
             "WELL": (
                 ["WELL_1"] * 20
@@ -24,14 +24,14 @@ class TestValidationAndModels(unittest.TestCase):
                 + ["WELL_5"] * 20
             ),
             "DEPTH": list(np.linspace(100, 200, 20)) * 5,
-            "GR": np.random.default_rng(42).normal(50, 15, 100),
-            "RHOB": np.random.default_rng(42).normal(2.3, 0.2, 100),
-            "NPHI": np.random.default_rng(42).normal(0.2, 0.05, 100),
-            "DT": np.random.default_rng(42).normal(80, 10, 100),
-            "SP": np.random.default_rng(42).normal(0, 50, 100),
-            "RDEP": np.random.default_rng(42).uniform(0.1, 10, 100),
-            "RMED": np.random.default_rng(42).uniform(0.1, 10, 100),
-            "RSHA": np.random.default_rng(42).uniform(0.1, 10, 100),
+            "GR": rng.normal(50, 15, 100),
+            "RHOB": rng.normal(2.3, 0.2, 100),
+            "NPHI": rng.normal(0.2, 0.05, 100),
+            "DT": rng.normal(80, 10, 100),
+            "SP": rng.normal(0, 50, 100),
+            "RDEP": rng.uniform(0.1, 10, 100),
+            "RMED": rng.uniform(0.1, 10, 100),
+            "RSHA": rng.uniform(0.1, 10, 100),
             "LITHOLOGY": (
                 [30000] * 15
                 + [65000] * 5
@@ -154,6 +154,57 @@ class TestValidationAndModels(unittest.TestCase):
 
         probs = model.predict_proba(X)
         self.assertEqual(probs.shape, (len(X), len(np.unique(y))))
+
+    def test_split_quality_and_stratification(self) -> None:
+        """
+        Verify that the stratified split proportions and class distribution are reasonable.
+        """
+        for test_size in [0.2, 0.4]:
+            train_df, test_df = train_test_split_by_well(
+                self.df, test_size=test_size, random_state=42
+            )
+            self.assertGreater(len(train_df), 0)
+            self.assertGreater(len(test_df), 0)
+
+            # Check that proportion of wells in test set is close to test_size
+            total_wells = self.df["WELL"].nunique()
+            test_wells = test_df["WELL"].nunique()
+            self.assertAlmostEqual(test_wells / total_wells, test_size, delta=0.21)
+
+    def test_model_interface_invariants(self) -> None:
+        """
+        Verify that the models expose classes_ and feature_names_in_ after fit.
+        """
+        X = self.df[["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]]
+        y = self.df["LITHOLOGY"]
+
+        # BaselineLogisticRegression
+        model_lr = BaselineLogisticRegression(random_state=42)
+        with self.assertRaises(AttributeError):
+            _ = model_lr.classes_
+        with self.assertRaises(AttributeError):
+            _ = model_lr.feature_names_in_
+
+        model_lr.fit(X, y)
+        self.assertTrue(hasattr(model_lr, "classes_"))
+        self.assertTrue(hasattr(model_lr, "feature_names_in_"))
+
+        self.assertEqual(len(model_lr.classes_), len(np.unique(y)))
+        self.assertEqual(list(model_lr.feature_names_in_), list(X.columns))
+
+        # LithotypeRandomForest
+        model_rf = LithotypeRandomForest(random_state=42)
+        with self.assertRaises(AttributeError):
+            _ = model_rf.classes_
+        with self.assertRaises(AttributeError):
+            _ = model_rf.feature_names_in_
+
+        model_rf.fit(X, y)
+        self.assertTrue(hasattr(model_rf, "classes_"))
+        self.assertTrue(hasattr(model_rf, "feature_names_in_"))
+
+        self.assertEqual(len(model_rf.classes_), len(np.unique(y)))
+        self.assertEqual(list(model_rf.feature_names_in_), list(X.columns))
 
 
 if __name__ == "__main__":

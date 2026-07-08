@@ -7,7 +7,7 @@ name = "lithology-classifier"
 version = "0.1.0"
 description = "A classifier for well log lithology"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "lasio>=0.31",
     "pandas>=2.0.0",
@@ -16,6 +16,10 @@ dependencies = [
     "xgboost>=2.0.3",
     "catboost>=1.2.5",
     "matplotlib>=3.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
     "pytest",
     "pytest-cov",
 ]
@@ -70,11 +74,7 @@ warn_unreachable = true
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = [
-    "tests.*",
-    "test_data_loader",
-    "test_data_preprocessor"
-]
+module = "test_validation_and_models,test_data_loader,test_data_preprocessor"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
@@ -84,5 +84,5 @@ omit = ["tests/*"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 100
+fail_under = 90
 

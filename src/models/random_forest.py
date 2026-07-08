@@ -62,3 +62,17 @@ class LithotypeRandomForest:
         """
         logger.info("Predicting probabilities with LithotypeRandomForest...")
         return cast(np.ndarray, self.pipeline.predict_proba(X))
+
+    @property
+    def classes_(self) -> np.ndarray:
+        """
+        Classes labels list.
+        """
+        return cast(np.ndarray, self.pipeline.classes_)
+
+    @property
+    def feature_names_in_(self) -> np.ndarray:
+        """
+        Names of features seen during fit.
+        """
+        return cast(np.ndarray, self.pipeline.feature_names_in_)

@@ -74,10 +74,10 @@ def calculate_penalty_score(
 
     penalty_matrix = np.load(penalty_matrix_path)
 
-    y_true_mapped = np.vectorize(LITHOLOGY_NUMBERS.get)(y_true)
-    y_pred_mapped = np.vectorize(LITHOLOGY_NUMBERS.get)(y_pred)
+    y_true_mapped = np.vectorize(lambda x: LITHOLOGY_NUMBERS.get(x, -1))(y_true)
+    y_pred_mapped = np.vectorize(lambda x: LITHOLOGY_NUMBERS.get(x, -1))(y_pred)
 
-    valid_mask = (y_true_mapped is not None) & (y_pred_mapped is not None)
+    valid_mask = (y_true_mapped != -1) & (y_pred_mapped != -1)
     if not np.all(valid_mask):
         logger.warning(
             "Some lithology values could not be mapped to penalty matrix indices."
@@ -159,7 +159,7 @@ def main():
     train_df, test_df = train_test_split_by_well(raw_df, test_size=0.2, random_state=42)
 
     logger.info("Initializing DataPreprocessor with impute=True...")
-    preprocessor = DataPreprocessor(step=0.152, impute=True, add_indicators=False)
+    preprocessor = DataPreprocessor(step=0.1524, impute=True, add_indicators=False)
 
     logger.info("Fitting DataPreprocessor on Train split...")
     train_df_proc = preprocessor.fit_transform(train_df)
@@ -167,9 +167,13 @@ def main():
     logger.info("Transforming Hold-Out split using Train statistics...")
     test_df_proc = preprocessor.transform(test_df)
 
-    logger.info("Filtering out missing targets after resampling...")
-    train_df_proc = train_df_proc.dropna(subset=["LITHOLOGY"])
-    test_df_proc = test_df_proc.dropna(subset=["LITHOLOGY"])
+    logger.info("Filtering out missing and out-of-taxonomy targets after resampling...")
+    train_df_proc = train_df_proc[
+        train_df_proc["LITHOLOGY"].isin(LITHOLOGY_NUMBERS.keys())
+    ]
+    test_df_proc = test_df_proc[
+        test_df_proc["LITHOLOGY"].isin(LITHOLOGY_NUMBERS.keys())
+    ]
 
     features = ["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]
     logger.info(f"Using features: {features}")
@@ -182,8 +186,8 @@ def main():
 
     logger.info(f"Train shape: {X_train.shape}, Hold-Out test shape: {X_test.shape}")
 
-    unique_labels = sorted(set(y_train.unique()).union(set(y_test.unique())))
-    logger.info(f"Union of target classes across splits: {unique_labels}")
+    unique_labels = sorted(LITHOLOGY_NUMBERS.keys())
+    logger.info(f"Target classes across splits based on taxonomy: {unique_labels}")
 
     results = []
 
