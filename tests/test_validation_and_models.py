@@ -166,7 +166,6 @@ class TestValidationAndModels(unittest.TestCase):
             self.assertGreater(len(train_df), 0)
             self.assertGreater(len(test_df), 0)
 
-            # Check that proportion of wells in test set is close to test_size
             total_wells = self.df["WELL"].nunique()
             test_wells = test_df["WELL"].nunique()
             self.assertAlmostEqual(test_wells / total_wells, test_size, delta=0.21)
@@ -178,7 +177,6 @@ class TestValidationAndModels(unittest.TestCase):
         X = self.df[["GR", "RHOB", "NPHI", "DT", "SP", "RDEP", "RMED", "RSHA"]]
         y = self.df["LITHOLOGY"]
 
-        # BaselineLogisticRegression
         model_lr = BaselineLogisticRegression(random_state=42)
         with self.assertRaises(AttributeError):
             _ = model_lr.classes_
@@ -192,7 +190,6 @@ class TestValidationAndModels(unittest.TestCase):
         self.assertEqual(len(model_lr.classes_), len(np.unique(y)))
         self.assertEqual(list(model_lr.feature_names_in_), list(X.columns))
 
-        # LithotypeRandomForest
         model_rf = LithotypeRandomForest(random_state=42)
         with self.assertRaises(AttributeError):
             _ = model_rf.classes_
@@ -205,6 +202,58 @@ class TestValidationAndModels(unittest.TestCase):
 
         self.assertEqual(len(model_rf.classes_), len(np.unique(y)))
         self.assertEqual(list(model_rf.feature_names_in_), list(X.columns))
+
+    def test_train_test_split_by_well_excludes_nan_targets(self) -> None:
+        """
+        Verify that train_test_split_by_well filters out rows with NaN targets.
+        """
+        df_nan = self.df.copy()
+        df_nan["LITHOLOGY"] = df_nan["LITHOLOGY"].astype(float)
+
+        only_nan_well = pd.DataFrame(
+            {
+                "WELL": ["WELL_ONLY_NAN"] * 5,
+                "DEPTH": [10.0, 20.0, 30.0, 40.0, 50.0],
+                "GR": [50.0] * 5,
+                "RHOB": [2.3] * 5,
+                "NPHI": [0.2] * 5,
+                "DT": [80.0] * 5,
+                "SP": [0.0] * 5,
+                "RDEP": [1.0] * 5,
+                "RMED": [1.0] * 5,
+                "RSHA": [1.0] * 5,
+                "LITHOLOGY": [np.nan] * 5,
+            }
+        )
+
+        df_nan.loc[df_nan["WELL"] == "WELL_1", "LITHOLOGY"] = [30000.0] * 15 + [
+            np.nan
+        ] * 5
+
+        df_combined = pd.concat([df_nan, only_nan_well], ignore_index=True)
+
+        train_df, test_df = train_test_split_by_well(
+            df_combined, test_size=0.4, random_state=42
+        )
+
+        self.assertFalse(train_df["LITHOLOGY"].isna().any())
+        self.assertFalse(test_df["LITHOLOGY"].isna().any())
+
+        self.assertNotIn("WELL_ONLY_NAN", train_df["WELL"].unique())
+        self.assertNotIn("WELL_ONLY_NAN", test_df["WELL"].unique())
+
+        self.assertTrue(
+            (
+                "WELL_1" in train_df["WELL"].unique()
+                and "WELL_1" not in test_df["WELL"].unique()
+            )
+            or (
+                "WELL_1" in test_df["WELL"].unique()
+                and "WELL_1" not in train_df["WELL"].unique()
+            )
+        )
+        well_1_split = train_df if "WELL_1" in train_df["WELL"].unique() else test_df
+        self.assertEqual(len(well_1_split[well_1_split["WELL"] == "WELL_1"]), 15)
 
 
 if __name__ == "__main__":

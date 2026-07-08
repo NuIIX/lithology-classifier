@@ -152,7 +152,6 @@ class GreedyStratifiedGroupSplit:
                 else:
                     test_groups.append(g)
 
-        # Enforce non-empty splits of labeled groups if one of them is empty
         train_labeled = [g for g in train_groups if g in group_class_counts.index]
         test_labeled = [g for g in test_groups if g in group_class_counts.index]
         if not train_labeled or not test_labeled:
@@ -249,6 +248,9 @@ def train_test_split_by_well(
 
     train_df = df[df[groups_col].isin(train_wells)].copy()
     test_df = df[df[groups_col].isin(test_wells)].copy()
+
+    train_df = train_df.dropna(subset=[target_col])
+    test_df = test_df.dropna(subset=[target_col])
 
     logger.info("Split summary:")
     logger.info(f"Total wells: {df[groups_col].nunique()}")

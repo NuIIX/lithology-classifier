@@ -74,8 +74,15 @@ def calculate_penalty_score(
 
     penalty_matrix = np.load(penalty_matrix_path)
 
-    y_true_mapped = np.vectorize(lambda x: LITHOLOGY_NUMBERS.get(x, -1))(y_true)
-    y_pred_mapped = np.vectorize(lambda x: LITHOLOGY_NUMBERS.get(x, -1))(y_pred)
+    y_true_numeric = pd.to_numeric(pd.Series(y_true), errors="coerce")
+    y_pred_numeric = pd.to_numeric(pd.Series(y_pred), errors="coerce")
+
+    y_true_mapped = (
+        y_true_numeric.map(LITHOLOGY_NUMBERS).fillna(-1).astype(np.int64).values
+    )
+    y_pred_mapped = (
+        y_pred_numeric.map(LITHOLOGY_NUMBERS).fillna(-1).astype(np.int64).values
+    )
 
     valid_mask = (y_true_mapped != -1) & (y_pred_mapped != -1)
     if not np.all(valid_mask):
