@@ -428,9 +428,15 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-data/
+/data/
 .venv/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
+reports/
+*docx
+.ipynb_checkpoints/
+
+lithology-presentation/
+catboost_info/
