@@ -7,3 +7,6 @@ catboost==1.2.5
 matplotlib==3.9.0
 pytest
 pytest-cov
+ruff
+mypy
+

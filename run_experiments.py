@@ -105,7 +105,7 @@ def plot_and_save_confusion_matrix(
 
     fig, ax = plt.subplots(figsize=(12, 10))
     im = ax.imshow(cm_norm, interpolation="nearest", cmap=plt.get_cmap("Blues"))
-    ax.figure.colorbar(im, ax=ax)
+    fig.colorbar(im, ax=ax)
 
     label_names = [f"{lbl} ({LITHOLOGY_NAMES.get(lbl, 'Unknown')})" for lbl in labels]
 

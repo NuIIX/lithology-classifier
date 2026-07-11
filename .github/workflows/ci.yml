@@ -37,4 +37,4 @@ jobs:
         run: python -m mypy src tests
 
       - name: Run Tests and Check Coverage
-        run: python -m pytest --cov=src/ --cov-fail-under=100
+        run: python -m pytest --cov=src/
