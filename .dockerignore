@@ -1,0 +1,14 @@
+.git
+.venv
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov/
+*.log
+__pycache__/
+**/*.pyc
+**/*.pyo
+reports/
+data/*
+!data/CSV_train.csv
+!data/penalty_matrix.npy

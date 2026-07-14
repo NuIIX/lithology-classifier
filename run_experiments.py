@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +14,9 @@ from sklearn.metrics import (
 from src.data.split import train_test_split_by_well
 from src.data_loader import DataLoader
 from src.data_preprocessor import DataPreprocessor
+from src.metrics.penalty import CustomPenaltyScorer
 from src.models.baseline_lr import BaselineLogisticRegression
+from src.models.catboost_classifier import LithotypeCatBoostWrapper
 from src.models.random_forest import LithotypeRandomForest
 
 os.makedirs("reports", exist_ok=True)
@@ -26,7 +29,6 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("run_experiments")
-
 
 LITHOLOGY_NUMBERS = {
     30000: 0,
@@ -59,44 +61,29 @@ LITHOLOGY_NAMES = {
 }
 
 
-def calculate_penalty_score(
-    y_true: np.ndarray,
-    y_pred: np.ndarray,
-    penalty_matrix_path: str = "data/penalty_matrix.npy",
-) -> float:
+class LithoLabelEncoder:
     """
-    Computes the FORCE 2020 custom penalty score.
-    S = - (1/N) * sum(A[y_true, y_pred])
+    Encodes geology lithology codes into dense [0..11] indices.
     """
-    if not os.path.exists(penalty_matrix_path):
-        logger.error(f"Penalty matrix not found at {penalty_matrix_path}")
-        return np.nan
 
-    penalty_matrix = np.load(penalty_matrix_path)
+    def __init__(self) -> None:
+        self.mapping = LITHOLOGY_NUMBERS
+        self.inverse_mapping = {v: k for k, v in self.mapping.items()}
+        self.classes_ = np.array(sorted(self.mapping.keys()))
 
-    y_true_numeric = pd.to_numeric(pd.Series(y_true), errors="coerce")
-    y_pred_numeric = pd.to_numeric(pd.Series(y_pred), errors="coerce")
+    def fit(self, y: pd.Series | np.ndarray | None = None) -> "LithoLabelEncoder":
+        return self
 
-    y_true_mapped = (
-        y_true_numeric.map(LITHOLOGY_NUMBERS).fillna(-1).astype(np.int64).values
-    )
-    y_pred_mapped = (
-        y_pred_numeric.map(LITHOLOGY_NUMBERS).fillna(-1).astype(np.int64).values
-    )
+    def transform(self, y: pd.Series | np.ndarray) -> np.ndarray:
+        y_arr = np.asarray(y)
+        return cast(np.ndarray, np.vectorize(self.mapping.get)(y_arr))
 
-    valid_mask = (y_true_mapped != -1) & (y_pred_mapped != -1)
-    if not np.all(valid_mask):
-        logger.warning(
-            "Some lithology values could not be mapped to penalty matrix indices."
-        )
-        y_true_mapped = y_true_mapped[valid_mask]
-        y_pred_mapped = y_pred_mapped[valid_mask]
+    def fit_transform(self, y: pd.Series | np.ndarray) -> np.ndarray:
+        return self.transform(y)
 
-    if len(y_true_mapped) == 0:
-        return 0.0
-
-    penalties = penalty_matrix[y_true_mapped.astype(int), y_pred_mapped.astype(int)]
-    return float(-np.mean(penalties))
+    def inverse_transform(self, y: pd.Series | np.ndarray) -> np.ndarray:
+        y_arr = np.asarray(y)
+        return cast(np.ndarray, np.vectorize(self.inverse_mapping.get)(y_arr))
 
 
 def plot_and_save_confusion_matrix(
@@ -105,7 +92,7 @@ def plot_and_save_confusion_matrix(
     labels: list,
     model_name: str,
     output_path: str,
-):
+) -> None:
     """
     Plots a beautiful confusion matrix normalized by recall (row totals) and saves it.
     """
@@ -117,8 +104,8 @@ def plot_and_save_confusion_matrix(
     )
 
     fig, ax = plt.subplots(figsize=(12, 10))
-    im = ax.imshow(cm_norm, interpolation="nearest", cmap=plt.cm.Blues)
-    ax.figure.colorbar(im, ax=ax)
+    im = ax.imshow(cm_norm, interpolation="nearest", cmap=plt.get_cmap("Blues"))
+    fig.colorbar(im, ax=ax)
 
     label_names = [f"{lbl} ({LITHOLOGY_NAMES.get(lbl, 'Unknown')})" for lbl in labels]
 
@@ -154,7 +141,7 @@ def plot_and_save_confusion_matrix(
     logger.info(f"Saved confusion matrix plot for {model_name} to {output_path}")
 
 
-def main():
+def main() -> None:
     logger.info("Starting well log lithotype classification experiments...")
 
     train_csv_path = "data/CSV_train.csv"
@@ -196,13 +183,20 @@ def main():
     unique_labels = sorted(LITHOLOGY_NUMBERS.keys())
     logger.info(f"Target classes across splits based on taxonomy: {unique_labels}")
 
+    le = LithoLabelEncoder()
+    y_train_encoded = le.fit_transform(y_train)
+
+    penalty_matrix = np.load("data/penalty_matrix.npy")
+    scorer = CustomPenaltyScorer(matrix=penalty_matrix, mapping=LITHOLOGY_NUMBERS)
+
     results = []
 
     logger.info("Initializing Baseline Logistic Regression model...")
     lr_model = BaselineLogisticRegression(random_state=42)
-    lr_model.fit(X_train, y_train)
+    lr_model.fit(X_train, y_train_encoded)
 
-    lr_preds = lr_model.predict(X_test)
+    lr_preds_encoded = lr_model.predict(X_test)
+    lr_preds = le.inverse_transform(lr_preds_encoded)
 
     lr_acc = accuracy_score(y_test, lr_preds)
     lr_prec_macro, lr_rec_macro, lr_f1_macro, _ = precision_recall_fscore_support(
@@ -211,9 +205,7 @@ def main():
     _, _, lr_f1_weighted, _ = precision_recall_fscore_support(
         y_test, lr_preds, average="weighted", labels=unique_labels, zero_division=0
     )
-    lr_penalty = calculate_penalty_score(
-        y_test.values, lr_preds, "data/penalty_matrix.npy"
-    )
+    lr_penalty = scorer.calculate_penalty_score(y_test.values, lr_preds)
 
     logger.info("--- Logistic Regression Metrics ---")
     logger.info(f"Accuracy: {lr_acc:.4f}")
@@ -243,9 +235,10 @@ def main():
 
     logger.info("Initializing Random Forest Classifier...")
     rf_model = LithotypeRandomForest(random_state=42)
-    rf_model.fit(X_train, y_train)
+    rf_model.fit(X_train, y_train_encoded)
 
-    rf_preds = rf_model.predict(X_test)
+    rf_preds_encoded = rf_model.predict(X_test)
+    rf_preds = le.inverse_transform(rf_preds_encoded)
 
     rf_acc = accuracy_score(y_test, rf_preds)
     rf_prec_macro, rf_rec_macro, rf_f1_macro, _ = precision_recall_fscore_support(
@@ -254,9 +247,7 @@ def main():
     _, _, rf_f1_weighted, _ = precision_recall_fscore_support(
         y_test, rf_preds, average="weighted", labels=unique_labels, zero_division=0
     )
-    rf_penalty = calculate_penalty_score(
-        y_test.values, rf_preds, "data/penalty_matrix.npy"
-    )
+    rf_penalty = scorer.calculate_penalty_score(y_test.values, rf_preds)
 
     logger.info("--- Random Forest Metrics ---")
     logger.info(f"Accuracy: {rf_acc:.4f}")
@@ -284,9 +275,51 @@ def main():
         "reports/plots/confusion_matrix_rf.png",
     )
 
+    logger.info("Initializing CatBoost Classifier...")
+    cb_model = LithotypeCatBoostWrapper(random_seed=42)
+    cb_model.fit(X_train, y_train_encoded)
+
+    cb_preds_encoded = cb_model.predict(X_test)
+    cb_preds = le.inverse_transform(cb_preds_encoded)
+
+    cb_acc = accuracy_score(y_test, cb_preds)
+    cb_prec_macro, cb_rec_macro, cb_f1_macro, _ = precision_recall_fscore_support(
+        y_test, cb_preds, average="macro", labels=unique_labels, zero_division=0
+    )
+    _, _, cb_f1_weighted, _ = precision_recall_fscore_support(
+        y_test, cb_preds, average="weighted", labels=unique_labels, zero_division=0
+    )
+    cb_penalty = scorer.calculate_penalty_score(y_test.values, cb_preds)
+
+    logger.info("--- CatBoost Metrics ---")
+    logger.info(f"Accuracy: {cb_acc:.4f}")
+    logger.info(f"Macro F1-score: {cb_f1_macro:.4f}")
+    logger.info(f"Weighted F1-score: {cb_f1_weighted:.4f}")
+    logger.info(f"Penalty Score: {cb_penalty:.4f}")
+
+    results.append(
+        {
+            "Model": "CatBoost",
+            "Macro-F1": cb_f1_macro,
+            "Weighted-F1": cb_f1_weighted,
+            "Accuracy": cb_acc,
+            "Precision_macro": cb_prec_macro,
+            "Recall_macro": cb_rec_macro,
+            "Penalty_Score": cb_penalty,
+        }
+    )
+
+    plot_and_save_confusion_matrix(
+        y_test.values,
+        cb_preds,
+        unique_labels,
+        "CatBoost",
+        "reports/plots/confusion_matrix_cb.png",
+    )
+
     results_df = pd.DataFrame(results)
-    results_df.to_csv("reports/baseline_vs_rf.csv", index=False)
-    logger.info("Saved summary report to reports/baseline_vs_rf.csv")
+    results_df.to_csv("reports/baseline_vs_rf_vs_cb.csv", index=False)
+    logger.info("Saved summary report to reports/baseline_vs_rf_vs_cb.csv")
 
     print("\nSummary Experiments Report:")
     print(results_df.to_string(index=False))
