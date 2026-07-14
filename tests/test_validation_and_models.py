@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from src.data.split import GreedyStratifiedGroupSplit, train_test_split_by_well
-from src.metrics.penalty import ForcePenaltyScorer
+from src.metrics.penalty import CustomPenaltyScorer
 from src.models.baseline_lr import BaselineLogisticRegression
 from src.models.catboost_classifier import LithotypeCatBoostWrapper
 from src.models.random_forest import LithotypeRandomForest
@@ -258,15 +258,16 @@ class TestValidationAndModels(unittest.TestCase):
         well_1_split = train_df if "WELL_1" in train_df["WELL"].unique() else test_df
         self.assertEqual(len(well_1_split[well_1_split["WELL"] == "WELL_1"]), 15)
 
-    def test_force_penalty_scorer_mock_matrix(self) -> None:
+    def test_custom_penalty_scorer_mock_matrix(self) -> None:
         """
-        Verify that ForcePenaltyScorer correctly maps lithology codes
+        Verify that CustomPenaltyScorer correctly maps lithology codes
         and computes the average penalty score using a mock matrix.
         """
         mock_matrix = np.zeros((12, 12))
         mock_matrix[0, 11] = 10.0
 
-        scorer = ForcePenaltyScorer(matrix=mock_matrix)
+        mapping = {30000: 0, 93000: 11}
+        scorer = CustomPenaltyScorer(matrix=mock_matrix, mapping=mapping)
 
         y_true = np.array([30000, 30000])
         y_pred = np.array([30000, 93000])
@@ -274,31 +275,31 @@ class TestValidationAndModels(unittest.TestCase):
         score = scorer.calculate_penalty_score(y_true, y_pred)
         self.assertEqual(score, -5.0)
 
-    def test_force_penalty_scorer_empty_input(self) -> None:
+    def test_custom_penalty_scorer_empty_input(self) -> None:
         """
-        Verify that ForcePenaltyScorer returns 0.0 for empty input.
+        Verify that CustomPenaltyScorer returns 0.0 for empty input.
         """
         mock_matrix = np.zeros((12, 12))
-        scorer = ForcePenaltyScorer(matrix=mock_matrix)
+        scorer = CustomPenaltyScorer(matrix=mock_matrix)
         score = scorer.calculate_penalty_score(np.array([]), np.array([]))
         self.assertEqual(score, 0.0)
 
-    def test_force_penalty_scorer_already_encoded(self) -> None:
+    def test_custom_penalty_scorer_already_encoded(self) -> None:
         """
-        Verify that ForcePenaltyScorer correctly computes penalty score
-        when inputs are already encoded as 0..11 indices.
+        Verify that CustomPenaltyScorer correctly computes penalty score
+        when inputs are already encoded as indices.
         """
         mock_matrix = np.zeros((12, 12))
         mock_matrix[0, 11] = 10.0
-        scorer = ForcePenaltyScorer(matrix=mock_matrix)
+        scorer = CustomPenaltyScorer(matrix=mock_matrix)
         y_true = np.array([0, 0])
         y_pred = np.array([0, 11])
         score = scorer.calculate_penalty_score(y_true, y_pred)
         self.assertEqual(score, -5.0)
 
-    def test_force_penalty_scorer_file_load(self) -> None:
+    def test_custom_penalty_scorer_file_load(self) -> None:
         """
-        Verify that ForcePenaltyScorer can load from a specified path.
+        Verify that CustomPenaltyScorer can load from a specified path.
         """
         import tempfile
 
@@ -306,7 +307,7 @@ class TestValidationAndModels(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             matrix_path = Path(tmpdir) / "penalty_matrix.npy"
             np.save(matrix_path, mock_matrix)
-            scorer = ForcePenaltyScorer(matrix_path=matrix_path)
+            scorer = CustomPenaltyScorer(matrix_path=matrix_path)
             self.assertTrue(np.array_equal(scorer.matrix, mock_matrix))
 
     def test_lithotype_catboost_wrapper(self) -> None:

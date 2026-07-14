@@ -14,7 +14,7 @@ from sklearn.metrics import (
 from src.data.split import train_test_split_by_well
 from src.data_loader import DataLoader
 from src.data_preprocessor import DataPreprocessor
-from src.metrics.penalty import ForcePenaltyScorer
+from src.metrics.penalty import CustomPenaltyScorer
 from src.models.baseline_lr import BaselineLogisticRegression
 from src.models.catboost_classifier import LithotypeCatBoostWrapper
 from src.models.random_forest import LithotypeRandomForest
@@ -186,7 +186,8 @@ def main() -> None:
     le = LithoLabelEncoder()
     y_train_encoded = le.fit_transform(y_train)
 
-    scorer = ForcePenaltyScorer(matrix_path="data/penalty_matrix.npy")
+    penalty_matrix = np.load("data/penalty_matrix.npy")
+    scorer = CustomPenaltyScorer(matrix=penalty_matrix, mapping=LITHOLOGY_NUMBERS)
 
     results = []
 

@@ -66,6 +66,23 @@ lithology-classifier/
 pip install -r requirements.txt
 ```
 
+### Подготовка данных
+
+Для запуска экспериментов необходимо загрузить файлы данных и поместить их в директорию `data/` (создайте её в корне проекта, если она отсутствует):
+
+1. **Набор данных FORCE 2020:** Скачайте файл обучающей выборки `CSV_train.csv` (а также при необходимости `CSV_test.csv` для тестирования) из официальных источников:
+   - Официальный репозиторий конкурса на GitHub: [bolgebrygg/Force-2020-Machine-Learning-competition](https://github.com/bolgebrygg/Force-2020-Machine-Learning-competition) (в папке `lithology_competition/data`)
+   - Google Drive папка организаторов: [FORCE 2020 Lithofacies Prediction Data](https://drive.google.com/drive/folders/0B7brcf-eGK8CRUhfRW9rSG91bW8)
+2. **Штрафная матрица (Penalty Matrix):** Скачайте файл `penalty_matrix.npy` с весами ошибок классификации из тех же источников и сохраните его как `data/penalty_matrix.npy`.
+
+Структура папки `data/` должна выглядеть следующим образом:
+```text
+data/
+├── CSV_train.csv
+├── CSV_test.csv
+└── penalty_matrix.npy
+```
+
 ### Воспроизводимость
 
 Все этапы пайплайна используют единый зафиксированный параметр `random_state` из модуля `src/config.py` для обеспечения полной воспроизводимости результатов.
